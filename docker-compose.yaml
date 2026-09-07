@@ -1,0 +1,95 @@
+# ---------------------------------------------------------
+# Include the model
+# ---------------------------------------------------------
+include:
+  - ../docker-compose.yaml  #with vllm-qwen2-awq- declared
+
+services:
+  # ---------------------------------------------------------
+  # ChromaDB — persistent vector database
+  # ---------------------------------------------------------
+  chromadb:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: chromadb_container
+    restart: unless-stopped
+    networks:
+      - rag_net
+    ports:
+      - "8000:8000"
+    volumes:
+      - /media/ia/chromadb-llama-cpp-rag:/chroma
+    environment:
+      - CHROMA_DB_IMPL=duckdb+parquet
+      - CHROMA_PERSIST_DIRECTORY=/chroma
+
+  # ---------------------------------------------------------
+  # RAG orchestrator — your Python app
+  # ---------------------------------------------------------
+  rag_orchestrator:
+    build: .
+#    build:
+#      context: ./rag_orchestrator
+#      context: .
+#      dockerfile: Dockerfile
+    container_name: rag_orchestrator_container
+    restart: unless-stopped
+    networks:
+      - rag_net
+    ports:
+      - "9000:9000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - LLAMA_SERVER_URL=http://vllm_qwen2:8080
+      - CHROMADB_URL=http://chromadb:8000
+    depends_on:
+#      - llama_cpp
+      - chromadb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    volumes:
+      - /media/ia/documents:/documents
+#    command: ["uvicorn", "rag_orchestrator:app", "--host", "0.0.0.0", "--port", "9000"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000"]
+
+networks:
+  rag_net:
+    driver: bridge
+
+#  rag_orchestrator:
+#    build: .
+#    container_name: rag_orchestrator
+#    ports:
+#      - "9000:9000"
+#    environment:
+#      - LLAMA_SERVER_URL=http://llama_server:8000
+#      - CHROMADB_URL=http://chromadb:8000
+#    depends_on:
+#      - llama_server
+#      - chromadb
+#    restart: unless-stopped
+
+#  llama_server:
+#    image: ggerganov/llama.cpp:full
+#    container_name: llama_server
+#    volumes:
+#      - /media/ia/models:/models
+#    command: >
+#      /usr/local/bin/llama-server
+#      -m /models/llama-3-8b-instruct.Q4_K_M.gguf
+#      --port 8000
+#      -t 8
+#    ports:
+#      - "8000:8000"
+#    restart: unless-stopped
+
+#  chromadb:
+#    image: chromadb/chroma:latest
+#    container_name: chromadb
+#    ports:
+#      - "8001:8000"
+#    volumes:
+#      - ./chroma_data:/chroma
+#    restart: unless-stopped
