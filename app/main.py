@@ -111,18 +111,26 @@ def health() -> Dict[str, Any]:
 # LISTA DE MODELOS + STATUS
 # ---------------------------------------------------------
 @app.get("/models")
-def models() -> Dict[str, Any]:
-    backend_status = healthcheck_all()
+def get_available_models_route():
+    # 1. Executa o healthcheck para pegar o estado em tempo real
+    health_results = healthcheck_all()
+
+    available_models = []
+
+    # 2. Varre os modelos configurados e busca o status real de dentro do health_results
+    for model_name, url in LLM_MODELS.items():
+        # Captura o status gerado na função healthcheck_all
+        model_status = health_results["models"].get(model_name, "unhealthy")
+
+        available_models.append({
+            "name": model_name,
+            "url": url,
+            # Se for "healthy", define como True. Caso contrário (unhealthy ou error), como False
+            "healthy": model_status == "healthy"
+        })
 
     return {
-        "available_models": [
-            {
-                "name": name,
-                "url": LLM_MODELS[name],
-                "healthy": backend_status.get(name, False)
-            }
-            for name in LLM_MODELS
-        ],
+        "available_models": available_models,
         "fallback_order": FALLBACK_ORDER
     }
 

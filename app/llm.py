@@ -1,6 +1,7 @@
 from app.retrieval.retrieve import normalize_context
 import requests
 from app.settings import (
+    _healthcheck,
     get_model_url,
     LLM_MODELS,
     FALLBACK_ORDER,
@@ -11,22 +12,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-# =========================================================
-# HEALTHCHECK CONFIG
-# =========================================================
-def _healthcheck(url: str) -> bool:
-    """
-    Verifica se o backend vLLM está saudável.
-    """
-
-    logger.info(f"Testando healthcheck do modelo: model_name -> {url}")
-
-    try:
-        r = requests.get(f"{url}/health", timeout=HEALTHCHECK_TIMEOUT)
-        return r.status_code == 200
-    except Exception:
-        return False
 
 # =========================================================
 # GENERATE LLM ANSWER CONFIG
@@ -109,7 +94,8 @@ def _call_model(model_name: str, question: str, context: str) -> str:
     logger.info(f"Chamando modelo {model_name} em {url}")
     logger.warning("PAYLOAD ENVIADO AO MODELO:\n" + str(payload))
 
-    r = requests.post(f"{url}/v1/chat/completions", json=payload, timeout=30)
+    # CORREÇÃO: Aumentado timeout para 180 segundos para suportar processamento de contextos longos em CPU
+    r = requests.post(f"{url}/v1/chat/completions", json=payload, timeout=180.0)
     r.raise_for_status()
     data = r.json()
 
