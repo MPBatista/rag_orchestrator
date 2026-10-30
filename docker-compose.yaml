@@ -1,8 +1,9 @@
 # ---------------------------------------------------------
 # Include the model
+# The model is configured in the hermes.
 # ---------------------------------------------------------
-include:
-  - ../docker-compose.yaml  #with vllm-qwen2-awq- declared
+#include:
+#  - ../docker-compose.yaml  #with vllm-qwen2-awq- declared
 
 services:
   # ---------------------------------------------------------
@@ -13,7 +14,7 @@ services:
     container_name: chromadb_container
     restart: unless-stopped
     networks:
-      - rag_net
+      - ai_net
     ports:
       - "8000:8000"
     volumes:
@@ -34,7 +35,7 @@ services:
     container_name: rag_orchestrator_container
     restart: unless-stopped
     networks:
-      - rag_net
+      - ai_net
     ports:
       - "9000:9000"
     environment:
@@ -55,41 +56,6 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9000"]
 
 networks:
-  rag_net:
-    driver: bridge
-
-#  rag_orchestrator:
-#    build: .
-#    container_name: rag_orchestrator
-#    ports:
-#      - "9000:9000"
-#    environment:
-#      - LLAMA_SERVER_URL=http://llama_server:8000
-#      - CHROMADB_URL=http://chromadb:8000
-#    depends_on:
-#      - llama_server
-#      - chromadb
-#    restart: unless-stopped
-
-#  llama_server:
-#    image: ggerganov/llama.cpp:full
-#    container_name: llama_server
-#    volumes:
-#      - /media/ia/models:/models
-#    command: >
-#      /usr/local/bin/llama-server
-#      -m /models/llama-3-8b-instruct.Q4_K_M.gguf
-#      --port 8000
-#      -t 8
-#    ports:
-#      - "8000:8000"
-#    restart: unless-stopped
-
-#  chromadb:
-#    image: chromadb/chroma:latest
-#    container_name: chromadb
-#    ports:
-#      - "8001:8000"
-#    volumes:
-#      - ./chroma_data:/chroma
-#    restart: unless-stopped
+  ai_net:
+    external: true
+#    driver: bridge

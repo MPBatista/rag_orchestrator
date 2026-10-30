@@ -8,17 +8,20 @@ from sentence_transformers import SentenceTransformer
 # =========================================================
 
 # URLs dos modelos servidos pelo docker-compose
-VLLM_URL = os.getenv("VLLM_URL", "http://vllm-server:8000")
+#VLLM_URL = os.getenv("VLLM_URL", "http://vllm-server:8000")
 LLAMA_CPP_URL  = os.getenv("LLAMA_CPP_URL",  "http://llama-server:8080")
 
 # Dicionário determinístico de modelos
 LLM_MODELS = {
-    "vllm": VLLM_URL,
+#    "vllm": VLLM_URL,
     "llama_cpp":  LLAMA_CPP_URL
 }
 
 # Ordem de fallback (determinística)
-FALLBACK_ORDER = ["vllm", "llama_cpp"]
+FALLBACK_ORDER = [
+#    "vllm",
+    "llama_cpp"
+]
 
 # =========================================================
 # GET MODEL URL
@@ -35,6 +38,27 @@ def get_model_url(model_name: str) -> str:
 # HEALTHCHECK CONFIG
 # =========================================================
 HEALTHCHECK_TIMEOUT = 3  # segundos
+
+def _healthcheck(url: str) -> bool:
+    """
+    Realiza uma requisição HTTP GET para validar a saúde do serviço.
+    Tenta acessar o endpoint '/health' comum em servidores LLM.
+     Se falhar ou não existir, tenta a raiz '/' do servidor.
+    """
+    # Llama.cpp e vLLM geralmente expõem /health
+    health_url = f"{url.rstrip('/')}/health"
+
+    try:
+        # Tenta o endpoint /health
+        with urllib.request.urlopen(health_url, timeout=HEALTHCHECK_TIMEOUT) as response:
+            return response.status in (200, 201, 204)
+    except Exception:
+        try:
+            # Fallback para a URL base caso /health não seja implementado
+            with urllib.request.urlopen(url, timeout=HEALTHCHECK_TIMEOUT) as response:
+                return response.status in (200, 201, 204)
+        except Exception:
+            return False
 
 # =========================================================
 # ChromaDB
