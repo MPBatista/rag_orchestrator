@@ -1,11 +1,15 @@
+import logging
+import os
+import tempfile
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Dict, Any
 from app.ingestion.pipeline import ingest_folder, ingest_text, ingest_text_content
 from app.retrieval.retrieve import retrieve
 from app.retrieval.rerank import rerank
 from app.chat.chat import generate_answer
-from app.chat.schemas import ChatRequest  # vamos colocar a classe em schemas.py
+from app.chat.schemas import ChatRequest
 from app.llm import generate_llm_answer, _call_model  # _call_model é usado para bypass do fallback
 from app.settings import (
     healthcheck_all,
@@ -15,16 +19,18 @@ from app.settings import (
 )
 from app.ingestion.loader import load_file
 
-class Message(BaseModel):
-    role: str
-    content: str
+logger = logging.getLogger("rag.main")
 
-#class ChatRequest(BaseModel):
-#    model: str = "llama3"
-#    question: str
-#    context: str = ""
-#    temperature: float = 0.2
-#    max_tokens: int = 512
+# ---------------------------------------------------------
+# SCHEMAS (validação automática -> 422, nunca mais 500 de payload)
+# ---------------------------------------------------------
+class QueryRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+    model: str = "llama_cpp"
+    top_k: int = Field(default=5, ge=1, le=20)
+
+class IngestTextRequest(BaseModel):
+    text: str = Field(min_length=1)
 
 app = FastAPI(
     title="RAG Orchestrator",
@@ -46,55 +52,65 @@ def ingest(req: dict):
     raise HTTPException(400, "Envoie 'folder' ou 'text'")
 
 @app.post("/ingest_text")
-def ingest_text_endpoint(req: dict):
-    text = req["text"]
-    result = ingest_text_content(text, source="text_input")
-    return result
+def ingest_text_endpoint(req: IngestTextRequest):
+    return ingest_text_content(req.text, source="text_input")
 
 @app.post("/ingest_file")
 async def ingest_file(file: UploadFile = File(...)):
     content = await file.read()
-    text = load_file(file.filename)
-    result = ingest_text_content(text, source=file.filename)
-    return {"filename": file.filename, **result}
+    if not content:
+        raise HTTPException(400, "Arquivo vazio")
+
+    # Salva o upload num arquivo temporário com a extensão correta
+    # (load_file precisa de um CAMINHO real, não do nome do arquivo)
+    suffix = os.path.splitext(file.filename or "")[1].lower()
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        text = load_file(tmp_path)
+        if not text or not text.strip():
+            raise HTTPException(400, f"Nenhum texto extraível de '{file.filename}'")
+        result = ingest_text_content(text, source=file.filename)
+        return {"filename": file.filename, **result}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("ingest_file falhou para %s", file.filename)
+        raise HTTPException(500, f"Falha ao processar '{file.filename}'")
+    finally:
+        if tmp_path:
+            os.unlink(tmp_path)
 
 # ---------------------------------------------------------
 # QUERY DO ORQUESTRADOR + BACKENDS
 # ---------------------------------------------------------
 @app.post("/query")
-def query(req: dict):
-
-    if "question" not in req:
-        raise ValueError("Campo 'question' é obrigatório")
-
-    question = req["question"]
-    model_name = req.get("model", "llama_cpp")
-
-    # 1. Recuperação REAL (lista de textos)
-    docs = retrieve(question)
-
-    print("DOCS:", docs)
-    for i, d in enumerate(docs):
-        print(i, type(d), d[:200] if isinstance(d, str) else d)
-
-    # 2. Rerank
-    ranked = rerank(question, docs)
-
-    # 3. Contexto REAL do RAG (top 5)
-    context = "\n\n".join([d["text"] for d in ranked[:5]])
-
-    # 4. Geração
-    answer = generate_llm_answer(
-        model_name=model_name,
-        question=question,
-        context=context
-    )
+def query(req: QueryRequest):
+    # Pydantic já garantiu question não-vazia e top_k inteiro entre 1 e 20.
+    if req.model not in LLM_MODELS:
+        raise HTTPException(
+            404,
+            f"Modelo '{req.model}' desconhecido. Disponíveis: {list(LLM_MODELS.keys())}",
+        )
+    try:
+        # retrieve() retorna list[str] — NÃO embrulhar em dict aqui,
+        # rerank() já devolve [{"text": str, "score": float}]
+        docs = retrieve(req.question)
+        ranked = rerank(req.question, docs)
+        top = ranked[: req.top_k]
+        context = "\n\n".join(d["text"] for d in top)
+        answer = generate_llm_answer(req.model, req.question, context)
+    except Exception:
+        logger.exception("query falhou")  # traceback completo no log do container
+        raise HTTPException(502, "Pipeline RAG indisponível (retrieve/rerank/LLM)")
 
     return {
-        "model_used": model_name,
-        "question": question,
-        "context_docs": ranked[:5],
-        "answer": answer
+        "model_used": req.model,
+        "question": req.question,
+        "context_docs": top,
+        "answer": answer,
     }
 
 # ---------------------------------------------------------
@@ -175,7 +191,8 @@ def direct_chat(model: str, body: ChatRequest) -> Dict[str, Any]:
         }
 
     except Exception as e:
+        logger.exception("direct_chat falhou para modelo %s", model)
         raise HTTPException(
-            status_code=500,
+            status_code=502,
             detail=f"Erro ao chamar modelo '{model}': {str(e)}"
         )
