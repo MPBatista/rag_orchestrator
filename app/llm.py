@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # =========================================================
+# RESOLVE MODEL ID DINAMICAMENTE
+# =========================================================
+def _resolve_model_id(url: str) -> str:
+    """
+    Consulta /v1/models no momento da inferência para obter o ID ativo.
+    """
+    try:
+        resp = requests.get(f"{url.rstrip('/')}/v1/models", timeout=5.0)
+        if resp.status_code == 200:
+            models = resp.json().get("data", [])
+            if models and "id" in models[0]:
+                return models[0]["id"]
+    except Exception as e:
+        logger.warning(f"Não foi possível obter /v1/models de {url}, usando '/model': {e}")
+    return "/model"
+
+# =========================================================
 # GENERATE LLM ANSWER CONFIG
 # =========================================================
 def generate_llm_answer(model_name: str, question: str, context: str):
@@ -78,9 +95,11 @@ def _call_model(model_name: str, question: str, context: str) -> str:
     )
 
     prompt = sanitize(prompt)
+    url = get_model_url(model_name)
+    active_model_id = _resolve_model_id(url)
 
     payload = {
-        "model": "/model",
+        "model": active_model_id,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -89,9 +108,7 @@ def _call_model(model_name: str, question: str, context: str) -> str:
         "stream": False
     }
 
-    url = get_model_url(model_name)
-
-    logger.info(f"Chamando modelo {model_name} em {url}")
+    logger.info(f"Chamando modelo '{active_model_id}' ({model_name}) em {url}")
     logger.warning("PAYLOAD ENVIADO AO MODELO:\n" + str(payload))
 
     # CORREÇÃO: Aumentado timeout para 180 segundos para suportar processamento de contextos longos em CPU

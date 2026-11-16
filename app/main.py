@@ -26,7 +26,7 @@ logger = logging.getLogger("rag.main")
 # ---------------------------------------------------------
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
-    model: str = "llama_cpp"
+    model: str = "vllm"
     top_k: int = Field(default=5, ge=1, le=20)
 
 class IngestTextRequest(BaseModel):

@@ -40,7 +40,8 @@ services:
       - "9000:9000"
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - LLAMA_SERVER_URL=http://vllm_qwen2:8080
+      - LLAMA_SERVER_URL=http://llama-server:8080
+      - VLLM_SERVER_URL=http://vllm-server:8000
       - CHROMADB_URL=http://chromadb:8000
     depends_on:
 #      - llama_cpp
@@ -58,4 +59,3 @@ services:
 networks:
   ai_net:
     external: true
-#    driver: bridge

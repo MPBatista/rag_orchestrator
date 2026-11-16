@@ -21,12 +21,15 @@ logger = logging.getLogger("RAG-Healthcheck")
 # =========================================================
 
 LLAMA_CPP_URL  = os.getenv("LLAMA_CPP_URL",  "http://llama-server:8080")
+VLLM_URL  = os.getenv("VLLM_URL",  "http://vllm-server:8000")
 
 LLM_MODELS = {
-    "llama_cpp":  LLAMA_CPP_URL
+    "vllm":  VLLM_URL,
+    "llama_cpp": LLAMA_CPP_URL
 }
 
 FALLBACK_ORDER = [
+    "vllm",
     "llama_cpp"
 ]
 
@@ -59,12 +62,16 @@ def _healthcheck(url: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=HEALTHCHECK_TIMEOUT) as response:
             status_code = response.status
-            body_content = response.read().decode('utf-8')
+            body_content = response.read().decode('utf-8').strip()
 
             # Log da resposta recebida com sucesso
             logger.info(f"Resposta recebida de {health_url} -> Status HTTP: {status_code} | Body: {body_content}")
 
             if status_code in (200, 201, 204):
+                # O vLLM retorna HTTP 200 com body vazio quando está saudável
+                if not body_content:
+                    return True
+
                 res_json = json.loads(body_content)
                 if res_json.get("status") == "ok" or res_json.get("health") == "ok":
                     return True
